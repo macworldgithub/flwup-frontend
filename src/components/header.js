@@ -1,8 +1,14 @@
 /**
  * Boran Motors CRM - Top Header Component
+ * Displays live database connection status, Swagger Docs link, New Lead creation, and Search
  */
 
-export function renderHeader(container, state, onSearch, onExport, onToggleMobileNav, onDateChange) {
+export function renderHeader(container, state, onSearch, onExport, onToggleMobileNav, onCreateLeadClick) {
+  const isDbConnected = state.dbConnected !== false;
+  const dbLabel = isDbConnected 
+    ? (state.dbInfo?.type ? `${state.dbInfo.type} Localhost:27017` : 'MongoDB Localhost:27017')
+    : 'Local Storage Fallback';
+
   container.innerHTML = `
     <header class="top-header">
       <div class="header-left">
@@ -14,8 +20,14 @@ export function renderHeader(container, state, onSearch, onExport, onToggleMobil
           </svg>
         </button>
         <div class="page-title-area">
-          <h1 class="page-title">Network Management</h1>
-          <span class="page-subtitle">Boran Motors Automotive Group · 4 Rooftops</span>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <h1 class="page-title">Network Management</h1>
+            <span class="db-status-pill ${isDbConnected ? 'connected' : 'disconnected'}" title="Local database API state">
+              <span class="status-dot"></span>
+              ${dbLabel}
+            </span>
+          </div>
+          <span class="page-subtitle">Boran Motors Automotive Group · 4 Rooftops · Pentana DMS Synced</span>
         </div>
       </div>
 
@@ -37,16 +49,26 @@ export function renderHeader(container, state, onSearch, onExport, onToggleMobil
       </div>
 
       <div class="header-right">
-        <!-- Date Range Badge -->
-        <div class="date-range-badge" title="Active reporting window">
+        <!-- Swagger API Docs Link -->
+        <a href="http://localhost:5000/api-docs" target="_blank" rel="noopener noreferrer" class="btn-swagger-link" title="Open Interactive Swagger Documentation">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-            <line x1="16" y1="2" x2="16" y2="6"></line>
-            <line x1="8" y1="2" x2="8" y2="6"></line>
-            <line x1="3" y1="10" x2="21" y2="10"></line>
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+            <line x1="16" y1="13" x2="8" y2="13"></line>
+            <line x1="16" y1="17" x2="8" y2="17"></line>
+            <polyline points="10 9 9 9 8 9"></polyline>
           </svg>
-          <span>Jul 10 – Oct 07, 2026 (90d)</span>
-        </div>
+          <span>Swagger Docs</span>
+        </a>
+
+        <!-- New Lead Action Button (Create in Database) -->
+        <button class="btn-primary" id="btn-header-new-lead" title="Create New Lead in Database (CRUD)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+          <span>New Lead</span>
+        </button>
 
         <!-- Export CSV Button -->
         <button class="btn-icon-secondary" id="btn-header-export" title="Export Current Records to CSV">
@@ -72,4 +94,9 @@ export function renderHeader(container, state, onSearch, onExport, onToggleMobil
 
   // Attach export button
   container.querySelector('#btn-header-export')?.addEventListener('click', onExport);
+
+  // Attach new lead button
+  container.querySelector('#btn-header-new-lead')?.addEventListener('click', () => {
+    if (onCreateLeadClick) onCreateLeadClick();
+  });
 }

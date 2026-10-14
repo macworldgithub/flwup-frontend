@@ -3,7 +3,7 @@
  * Pentana DMS System of Record & Harmony Sales Floor Workflow
  */
 
-export function renderLeadDrawer(container, lead, { onClose, onToggleAI, onAddDiaryEntry, onUpdateQueuedMessage }) {
+export function renderLeadDrawer(container, lead, { onClose, onToggleAI, onAddDiaryEntry, onUpdateQueuedMessage, onDeleteLead, onUpdateStatus }) {
   if (!lead) {
     container.innerHTML = `
       <div class="drawer-backdrop" id="lead-drawer-backdrop">
@@ -367,9 +367,15 @@ export function renderLeadDrawer(container, lead, { onClose, onToggleAI, onAddDi
             </svg>
             <span>Copy Pentana ID</span>
           </button>
-          <button class="btn-primary-red" id="btn-close-drawer-bottom">
-            <span>Done</span>
-          </button>
+          <div style="display: flex; gap: 8px;">
+            <button class="btn-danger-outline" id="btn-delete-lead-drawer" style="display: flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 6px; border: 1px solid #ef4444; background: rgba(239, 68, 68, 0.08); color: #ef4444; font-size: 13px; font-weight: 600; cursor: pointer;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+              <span>Delete Lead</span>
+            </button>
+            <button class="btn-primary-red" id="btn-close-drawer-bottom">
+              <span>Done</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -379,6 +385,15 @@ export function renderLeadDrawer(container, lead, { onClose, onToggleAI, onAddDi
   container.querySelector('#lead-drawer-backdrop')?.addEventListener('click', onClose);
   container.querySelector('#btn-drawer-close')?.addEventListener('click', onClose);
   container.querySelector('#btn-close-drawer-bottom')?.addEventListener('click', onClose);
+
+  // Delete Lead
+  container.querySelector('#btn-delete-lead-drawer')?.addEventListener('click', () => {
+    if (confirm(`Are you sure you want to permanently delete lead ${lead.customer_name} (${lead.deal_id}) from the database?`)) {
+      if (onDeleteLead) {
+        onDeleteLead(lead.deal_id);
+      }
+    }
+  });
 
   // Copy Pentana ID
   container.querySelector('#btn-copy-pentana-id')?.addEventListener('click', () => {

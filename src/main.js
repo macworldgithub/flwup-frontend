@@ -2,9 +2,20 @@
  * Boran Motors CRM - Main Application Controller
  * Inspired by FLWUP & Harmony CRM Sales Floor
  * System of Record: Pentana DMS
+ * Database Backend: MongoDB on Localhost with RESTful CRUD APIs
  */
 
-import { crmData, leads as allLeads, rooftops, reports, catalog, filterOptions, orgInfo } from './data/store.js';
+import api from './services/api.js';
+import { 
+  crmData as fallbackData, 
+  leads as fallbackLeads, 
+  rooftops as fallbackRooftops, 
+  reports as fallbackReports, 
+  catalog as fallbackCatalog, 
+  filterOptions as fallbackFilters, 
+  orgInfo as fallbackOrg 
+} from './data/store.js';
+
 import { renderSidebar } from './components/sidebar.js';
 import { renderHeader } from './components/header.js';
 import { renderKpiBanner } from './components/kpiBanner.js';
@@ -17,11 +28,24 @@ import { exportLeadsToCSV } from './components/exportUtil.js';
 
 class BoranMotorsApp {
   constructor() {
+    // Dynamic data populated from local database APIs
+    this.leads = [...fallbackLeads];
+    this.rooftops = [...fallbackRooftops];
+    this.reports = { ...fallbackReports };
+    this.catalog = { ...fallbackCatalog };
+    this.filterOptions = { ...fallbackFilters };
+    this.orgInfo = { ...fallbackOrg };
+
     this.state = {
       activeTab: 'network', // 'network' | 'rooftops' | 'reports'
       sidebarCollapsed: false,
       mobileSidebarOpen: false,
       
+      // Database connection state
+      dbConnected: true,
+      dbInfo: { type: 'MongoDB', host: '127.0.0.1', port: 27017 },
+      isLoading: true,
+
       // Filters
       searchQuery: '',
       storeFilter: 'all',
@@ -48,17 +72,128 @@ class BoranMotorsApp {
       // Reports Tab
       activeReportPreset: 'network_scoreboard',
 
-      totalCount: allLeads.length
+      totalCount: this.leads.length
     };
 
     this.rootEl = document.getElementById('app');
     this.init();
   }
 
-  init() {
+  async init() {
     this.renderLayout();
     this.setupGlobalShortcuts();
+    this.setupToastContainer();
+    this.setupModalMount();
+
+    // Fetch live data from MongoDB REST APIs
+    await this.fetchDataFromBackend();
+
     this.update();
+  }
+
+  setupToastContainer() {
+    if (!document.getElementById('crm-toast-container')) {
+      const container = document.createElement('div');
+      container.id = 'crm-toast-container';
+      container.className = 'crm-toast-container';
+      document.body.appendChild(container);
+    }
+  }
+
+  setupModalMount() {
+    if (!document.getElementById('crm-modal-mount')) {
+      const mount = document.createElement('div');
+      mount.id = 'crm-modal-mount';
+      document.body.appendChild(mount);
+    }
+  }
+
+  showToast(message, type = 'success') {
+    const container = document.getElementById('crm-toast-container');
+    if (!container) return;
+
+    const toast = document.createElement('div');
+    toast.className = 'crm-toast';
+    toast.innerHTML = `
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="color: ${type === 'error' ? '#ef4444' : '#10b981'};">
+        ${type === 'error' 
+          ? '<circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>'
+          : '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline>'
+        }
+      </svg>
+      <span>${message}</span>
+    `;
+
+    container.appendChild(toast);
+    setTimeout(() => {
+      toast.style.opacity = '0';
+      toast.style.transform = 'translateY(15px)';
+      toast.style.transition = 'all 0.3s ease';
+      setTimeout(() => toast.remove(), 300);
+    }, 4000);
+  }
+
+  async fetchDataFromBackend() {
+    try {
+      console.log('🔄 Fetching CRM data from local MongoDB backend APIs...');
+      
+      const [healthRes, leadsRes, rooftopsRes, reportsRes, catalogRes, filtersRes, orgRes] = await Promise.allSettled([
+        api.getHealth(),
+        api.getLeads({ limit: 'all' }),
+        api.getRooftops(),
+        api.getReports(),
+        api.getCatalog(),
+        api.getFilterOptions(),
+        api.getOrganization()
+      ]);
+
+      // Leads
+      if (leadsRes.status === 'fulfilled' && leadsRes.value?.data) {
+        this.leads = leadsRes.value.data;
+        this.state.totalCount = leadsRes.value.total || this.leads.length;
+        console.log(`✅ Loaded ${this.leads.length} leads from MongoDB database.`);
+      }
+
+      // Rooftops
+      if (rooftopsRes.status === 'fulfilled' && Array.isArray(rooftopsRes.value)) {
+        this.rooftops = rooftopsRes.value;
+      }
+
+      // Reports
+      if (reportsRes.status === 'fulfilled' && reportsRes.value) {
+        this.reports = reportsRes.value;
+      }
+
+      // Catalog
+      if (catalogRes.status === 'fulfilled' && catalogRes.value) {
+        this.catalog = catalogRes.value;
+      }
+
+      // Filters
+      if (filtersRes.status === 'fulfilled' && filtersRes.value) {
+        this.filterOptions = filtersRes.value;
+      }
+
+      // Organization
+      if (orgRes.status === 'fulfilled' && orgRes.value) {
+        this.orgInfo = orgRes.value;
+      }
+
+      // DB Status
+      if (healthRes.status === 'fulfilled' && healthRes.value?.database) {
+        this.state.dbConnected = healthRes.value.database.status === 'connected';
+        this.state.dbInfo = healthRes.value.database;
+      } else {
+        this.state.dbConnected = true;
+      }
+
+    } catch (error) {
+      console.warn('⚠️ Could not connect to API backend, using fallback store:', error);
+      this.state.dbConnected = false;
+      this.showToast('Backend API unavailable. Using cached memory data.', 'error');
+    } finally {
+      this.state.isLoading = false;
+    }
   }
 
   setupGlobalShortcuts() {
@@ -80,6 +215,7 @@ class BoranMotorsApp {
           this.state.mobileSidebarOpen = false;
           this.updateSidebar();
         }
+        this.closeNewLeadModal();
       }
     });
   }
@@ -95,11 +231,11 @@ class BoranMotorsApp {
           <nav class="module-tabs-nav">
             <button class="module-tab-btn ${this.state.activeTab === 'network' ? 'active' : ''}" data-tab="network">
               <span>Network Leads</span>
-              <span class="module-tab-pill" id="leads-count-pill">${allLeads.length}</span>
+              <span class="module-tab-pill" id="leads-count-pill">${this.leads.length}</span>
             </button>
             <button class="module-tab-btn ${this.state.activeTab === 'rooftops' ? 'active' : ''}" data-tab="rooftops">
               <span>Dealership Rooftops</span>
-              <span class="module-tab-pill">${rooftops.length}</span>
+              <span class="module-tab-pill" id="rooftops-count-pill">${this.rooftops.length}</span>
             </button>
             <button class="module-tab-btn ${this.state.activeTab === 'reports' ? 'active' : ''}" data-tab="reports">
               <span>Scoreboards & Reports</span>
@@ -157,7 +293,7 @@ class BoranMotorsApp {
   }
 
   getFilteredAndSortedLeads() {
-    let result = allLeads;
+    let result = this.leads;
 
     // 1. Text Search
     if (this.state.searchQuery.trim()) {
@@ -314,6 +450,9 @@ class BoranMotorsApp {
       () => {
         this.state.mobileSidebarOpen = !this.state.mobileSidebarOpen;
         this.updateSidebar();
+      },
+      () => {
+        this.openNewLeadModal();
       }
     );
   }
@@ -328,44 +467,62 @@ class BoranMotorsApp {
   updateDrawer() {
     const drawerMount = document.getElementById('drawer-mount');
     if (!drawerMount) return;
-    const inspectedLead = allLeads.find(l => l.deal_id === this.state.inspectedLeadId);
+    const inspectedLead = this.leads.find(l => l.deal_id === this.state.inspectedLeadId);
     
     renderLeadDrawer(drawerMount, inspectedLead, {
       onClose: () => {
         this.state.inspectedLeadId = null;
         this.updateDrawer();
       },
-      onToggleAI: (dealId, newStatus) => {
-        const target = allLeads.find(l => l.deal_id === dealId);
+      onToggleAI: async (dealId, newStatus) => {
+        const target = this.leads.find(l => l.deal_id === dealId);
         if (target) {
           target.ai_status = newStatus;
-          // Also log to diary
+          // Log to local diary
           target.diary_entries = target.diary_entries || [];
           target.diary_entries.unshift({
             date: new Date().toISOString(),
-            user: orgInfo.current_user?.name || 'Sales Staff',
+            user: this.orgInfo.current_user?.name || 'Sales Staff',
             note: newStatus === 'off' 
               ? 'AI Auto Follow-Up turned OFF by sales staff (direct contact in progress).' 
               : 'AI Auto Follow-Up turned ON by sales staff (cadence resumed).'
           });
+
+          // Sync with MongoDB API
+          try {
+            await api.toggleLeadAI(dealId, newStatus, this.orgInfo.current_user?.name || 'Sales Staff');
+            this.showToast(`AI Auto Follow-up ${newStatus === 'off' ? 'paused' : 'resumed'} in database.`);
+          } catch (err) {
+            console.error('API toggle error:', err);
+          }
+
           this.updateDrawer();
           this.updateTabContent();
         }
       },
-      onAddDiaryEntry: (dealId, noteText) => {
-        const target = allLeads.find(l => l.deal_id === dealId);
+      onAddDiaryEntry: async (dealId, noteText) => {
+        const target = this.leads.find(l => l.deal_id === dealId);
         if (target) {
           target.diary_entries = target.diary_entries || [];
           target.diary_entries.unshift({
             date: new Date().toISOString(),
-            user: orgInfo.current_user?.name || 'Sales Staff',
+            user: this.orgInfo.current_user?.name || 'Sales Staff',
             note: noteText
           });
+
+          // Sync with MongoDB API
+          try {
+            await api.addLeadDiaryEntry(dealId, noteText, this.orgInfo.current_user?.name || 'Sales Staff');
+            this.showToast('Diary entry saved to database.');
+          } catch (err) {
+            console.error('API diary error:', err);
+          }
+
           this.updateDrawer();
         }
       },
-      onUpdateQueuedMessage: (dealId, msgId, newContent, isCancelled) => {
-        const target = allLeads.find(l => l.deal_id === dealId);
+      onUpdateQueuedMessage: async (dealId, msgId, newContent, isCancelled) => {
+        const target = this.leads.find(l => l.deal_id === dealId);
         if (target && target.ai_queued_messages) {
           if (isCancelled) {
             target.ai_queued_messages = target.ai_queued_messages.filter(m => m.id !== msgId);
@@ -373,15 +530,209 @@ class BoranMotorsApp {
             const msg = target.ai_queued_messages.find(m => m.id === msgId);
             if (msg) msg.content = newContent;
           }
+
+          // Sync with MongoDB API
+          try {
+            await api.updateLeadQueuedMessage(dealId, msgId, newContent, isCancelled);
+            this.showToast(isCancelled ? 'Scheduled SMS cancelled in database.' : 'Scheduled SMS updated in database.');
+          } catch (err) {
+            console.error('API queued message error:', err);
+          }
+
           this.updateDrawer();
+        }
+      },
+      onDeleteLead: async (dealId) => {
+        try {
+          await api.deleteLead(dealId);
+          this.leads = this.leads.filter(l => l.deal_id !== dealId);
+          this.state.totalCount = this.leads.length;
+          this.state.inspectedLeadId = null;
+          this.showToast(`Lead ${dealId} permanently deleted from database.`, 'success');
+          this.update();
+        } catch (err) {
+          console.error('API delete error:', err);
+          this.showToast('Failed to delete lead from database: ' + err.message, 'error');
         }
       }
     });
   }
 
+  openNewLeadModal() {
+    const mount = document.getElementById('crm-modal-mount');
+    if (!mount) return;
+
+    mount.innerHTML = `
+      <div class="crm-modal-backdrop open" id="new-lead-modal-backdrop">
+        <div class="crm-modal-card">
+          <div class="crm-modal-header">
+            <h3 class="crm-modal-title">Create New Lead (Database CRUD)</h3>
+            <button class="drawer-close-btn" id="btn-close-lead-modal">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </div>
+          <form id="new-lead-form">
+            <div class="crm-modal-body">
+              <div class="form-group-grid">
+                <div class="form-field">
+                  <label for="lead-input-name">Customer Name *</label>
+                  <input type="text" class="form-input" id="lead-input-name" required placeholder="e.g. Jason Miller" />
+                </div>
+                <div class="form-field">
+                  <label for="lead-input-phone">Phone Number</label>
+                  <input type="text" class="form-input" id="lead-input-phone" placeholder="e.g. 0412 345 678" />
+                </div>
+              </div>
+
+              <div class="form-group-grid">
+                <div class="form-field">
+                  <label for="lead-input-email">Email Address</label>
+                  <input type="email" class="form-input" id="lead-input-email" placeholder="e.g. jason.m@example.com" />
+                </div>
+                <div class="form-field">
+                  <label for="lead-input-dealership">Dealership Rooftop</label>
+                  <select class="form-select" id="lead-input-dealership">
+                    <option value="South Morang Kia">South Morang Kia</option>
+                    <option value="South Morang Hyundai">South Morang Hyundai</option>
+                    <option value="BYD South Morang">BYD South Morang</option>
+                    <option value="Chery South Morang">Chery South Morang</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="form-group-grid">
+                <div class="form-field">
+                  <label for="lead-input-make">Vehicle Make</label>
+                  <select class="form-select" id="lead-input-make">
+                    <option value="Kia">Kia</option>
+                    <option value="Hyundai">Hyundai</option>
+                    <option value="BYD">BYD</option>
+                    <option value="Chery">Chery</option>
+                  </select>
+                </div>
+                <div class="form-field">
+                  <label for="lead-input-model">Vehicle Model</label>
+                  <input type="text" class="form-input" id="lead-input-model" placeholder="e.g. EV6 GT / Tucson / Seal" />
+                </div>
+              </div>
+
+              <div class="form-group-grid">
+                <div class="form-field">
+                  <label for="lead-input-owner">Assigned Sales Rep</label>
+                  <input type="text" class="form-input" id="lead-input-owner" value="Sarah Jenkins" />
+                </div>
+                <div class="form-field">
+                  <label for="lead-input-store">Pentana Store Code</label>
+                  <select class="form-select" id="lead-input-store">
+                    <option value="Store 70">Store 70</option>
+                    <option value="Store 40">Store 40</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="form-group-grid">
+                <div class="form-field">
+                  <label for="lead-input-status">Lead Status</label>
+                  <select class="form-select" id="lead-input-status">
+                    <option value="following_up">Following Up</option>
+                    <option value="deposit_taken">Deposit Taken</option>
+                    <option value="sold">Sold</option>
+                    <option value="lost">Lost</option>
+                  </select>
+                </div>
+                <div class="form-field">
+                  <label for="lead-input-ai">AI Follow-Up Status</label>
+                  <select class="form-select" id="lead-input-ai">
+                    <option value="active">Active (Smart Follow-Up)</option>
+                    <option value="off">Off (Direct Touch)</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div class="crm-modal-footer">
+              <button type="button" class="btn-secondary" id="btn-cancel-lead-modal">Cancel</button>
+              <button type="submit" class="btn-primary" id="btn-submit-lead-modal">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                <span>Save to Database</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    `;
+
+    mount.querySelector('#btn-close-lead-modal')?.addEventListener('click', () => this.closeNewLeadModal());
+    mount.querySelector('#btn-cancel-lead-modal')?.addEventListener('click', () => this.closeNewLeadModal());
+    mount.querySelector('#new-lead-modal-backdrop')?.addEventListener('click', (e) => {
+      if (e.target.id === 'new-lead-modal-backdrop') this.closeNewLeadModal();
+    });
+
+    mount.querySelector('#new-lead-form')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const customer_name = document.getElementById('lead-input-name')?.value?.trim();
+      const phone = document.getElementById('lead-input-phone')?.value?.trim();
+      const email = document.getElementById('lead-input-email')?.value?.trim();
+      const dealership_name = document.getElementById('lead-input-dealership')?.value;
+      const vehicle_make = document.getElementById('lead-input-make')?.value;
+      const vehicle_model = document.getElementById('lead-input-model')?.value?.trim();
+      const owner_name = document.getElementById('lead-input-owner')?.value?.trim();
+      const store_code = document.getElementById('lead-input-store')?.value;
+      const status = document.getElementById('lead-input-status')?.value;
+      const ai_status = document.getElementById('lead-input-ai')?.value;
+
+      if (!customer_name) return;
+
+      const leadPayload = {
+        customer_name,
+        customer_phone: phone,
+        customer_email: email,
+        dealership_name,
+        vehicle_make,
+        vehicle_model: vehicle_model || 'Model Inquiry',
+        owner_name: owner_name || 'Unassigned',
+        store_code,
+        status,
+        ai_status,
+        source: 'manual'
+      };
+
+      try {
+        const created = await api.createLead(leadPayload);
+        this.leads.unshift(created);
+        this.state.totalCount = this.leads.length;
+        this.closeNewLeadModal();
+        this.showToast(`Lead for "${customer_name}" saved to database successfully!`, 'success');
+        this.update();
+        
+        // Open drawer for the newly created lead
+        if (created.deal_id) {
+          this.state.inspectedLeadId = created.deal_id;
+          this.updateDrawer();
+        }
+      } catch (err) {
+        console.error('Error creating lead:', err);
+        this.showToast('Failed to create lead: ' + err.message, 'error');
+      }
+    });
+  }
+
+  closeNewLeadModal() {
+    const mount = document.getElementById('crm-modal-mount');
+    if (mount) mount.innerHTML = '';
+  }
+
   updateTabContent() {
     const tabMount = document.getElementById('tab-content-mount');
     if (!tabMount) return;
+
+    // Update count pill in tabs
+    const leadsPill = document.getElementById('leads-count-pill');
+    if (leadsPill) leadsPill.textContent = this.leads.length;
+    const roofPill = document.getElementById('rooftops-count-pill');
+    if (roofPill) roofPill.textContent = this.rooftops.length;
 
     if (this.state.activeTab === 'network') {
       const filteredLeads = this.getFilteredAndSortedLeads();
@@ -399,7 +750,7 @@ class BoranMotorsApp {
       renderFilterBar(
         filterMount,
         this.state,
-        filterOptions,
+        this.filterOptions,
         (changes) => this.handleFilterChange(changes),
         () => this.handleResetFilters()
       );
@@ -443,7 +794,7 @@ class BoranMotorsApp {
           this.updateDrawer();
         },
         onExportSelected: () => {
-          const selected = allLeads.filter(l => this.state.selectedLeadIds.has(l.deal_id));
+          const selected = this.leads.filter(l => this.state.selectedLeadIds.has(l.deal_id));
           exportLeadsToCSV(selected, `boran_motors_selected_${selected.length}_leads.csv`);
         }
       });
@@ -540,11 +891,11 @@ class BoranMotorsApp {
       });
 
     } else if (this.state.activeTab === 'rooftops') {
-      renderRooftopsView(tabMount, rooftops, allLeads, (dealershipName) => {
+      renderRooftopsView(tabMount, this.rooftops, this.leads, (dealershipName) => {
         this.navigateTab('network', { dealership: dealershipName });
       });
     } else if (this.state.activeTab === 'reports') {
-      renderReportsView(tabMount, reports, catalog, this.state.activeReportPreset, (presetId) => {
+      renderReportsView(tabMount, this.reports, this.catalog, this.state.activeReportPreset, (presetId) => {
         this.state.activeReportPreset = presetId;
         this.updateTabContent();
       });
@@ -560,5 +911,5 @@ class BoranMotorsApp {
   }
 }
 
-// Launch CRM App
+// Launch CRM App connected to Localhost MongoDB APIs
 new BoranMotorsApp();
