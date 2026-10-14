@@ -628,6 +628,215 @@ button, input, select, textarea {
   color: var(--bm-primary-red);
 }
 
+/* Module Tabs Wrapper & Refresh Action */
+.module-tabs-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--bm-border-grey);
+  margin-bottom: 4px;
+}
+
+.module-tabs-wrapper .module-tabs-nav {
+  border-bottom: none;
+  margin-bottom: 0;
+}
+
+.tab-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 6px;
+}
+
+.btn-tab-refresh {
+  background: var(--bm-white);
+  border: 1px solid var(--bm-border-grey);
+  border-radius: var(--radius-sm);
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--bm-secondary-text);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all var(--transition-fast);
+}
+
+.btn-tab-refresh:hover {
+  background: var(--bm-light-grey);
+  color: var(--bm-primary-text);
+  border-color: var(--bm-border-dark);
+}
+
+.btn-tab-refresh svg.spinning {
+  animation: spin 0.8s linear infinite;
+}
+
+/* Tab Loading State */
+.tab-loading-state {
+  background: var(--bm-white);
+  border: 1px solid var(--bm-border-grey);
+  border-radius: var(--radius-lg);
+  padding: 56px 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  text-align: center;
+  box-shadow: var(--shadow-sm);
+  min-height: 320px;
+}
+
+.tab-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3.5px solid var(--bm-border-grey);
+  border-top-color: var(--bm-primary-red);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.tab-loading-title {
+  font-family: var(--font-heading);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--bm-primary-text);
+  margin-bottom: 4px;
+}
+
+.tab-loading-desc {
+  font-size: 13px;
+  color: var(--bm-secondary-text);
+}
+
+.tab-skeleton-grid {
+  width: 100%;
+  max-width: 460px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.skeleton-bar {
+  height: 12px;
+  width: 100%;
+  background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.5s infinite;
+  border-radius: var(--radius-sm);
+}
+
+@keyframes skeleton-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Full Tab Error State */
+.tab-error-state {
+  background: #FEF2F2;
+  border: 1px solid #FECACA;
+  border-radius: var(--radius-lg);
+  padding: 36px 32px;
+  display: flex;
+  align-items: flex-start;
+  gap: 18px;
+  box-shadow: var(--shadow-sm);
+}
+
+.tab-error-icon {
+  background: #FEE2E2;
+  color: #DC2626;
+  border-radius: 50%;
+  width: 46px;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.tab-error-info {
+  flex: 1;
+}
+
+.tab-error-title {
+  font-family: var(--font-heading);
+  font-size: 16px;
+  font-weight: 700;
+  color: #991B1B;
+  margin-bottom: 4px;
+}
+
+.tab-error-desc {
+  font-size: 13px;
+  color: #B91C1C;
+  line-height: 1.5;
+  margin-bottom: 14px;
+}
+
+.btn-retry-tab {
+  background: #DC2626;
+  color: #ffffff;
+  border: none;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all var(--transition-fast);
+}
+
+.btn-retry-tab:hover {
+  background: #B91C1C;
+}
+
+/* Non-blocking Error Banner when fallback data is displayed */
+.tab-error-banner {
+  background: #FEF2F2;
+  border: 1px solid #FECACA;
+  border-radius: var(--radius-md);
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  font-size: 13px;
+  color: #991B1B;
+}
+
+.tab-error-banner-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-banner-retry {
+  background: transparent;
+  border: 1px solid #DC2626;
+  color: #DC2626;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-banner-retry:hover {
+  background: #DC2626;
+  color: #ffffff;
+}
+
 /* ==========================================================================
    SCOREBOARD & KPI METRICS BANNER
    ========================================================================== */

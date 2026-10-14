@@ -36,6 +36,14 @@ class BoranMotorsApp {
     this.filterOptions = { ...fallbackFilters };
     this.orgInfo = { ...fallbackOrg };
 
+    // On-demand tab data cache: tracks which tabs have been loaded from the API
+    // 'idle' = never fetched, 'loading' = in progress, 'loaded' = success, 'error' = failed
+    this._tabCache = {
+      network: { status: 'idle', error: null },
+      rooftops: { status: 'idle', error: null },
+      reports: { status: 'idle', error: null }
+    };
+
     this.state = {
       activeTab: 'network', // 'network' | 'rooftops' | 'reports'
       sidebarCollapsed: false,
@@ -85,10 +93,14 @@ class BoranMotorsApp {
     this.setupToastContainer();
     this.setupModalMount();
 
-    // Fetch live data from MongoDB REST APIs
-    await this.fetchDataFromBackend();
+    // Fetch only lightweight shared data on startup (health, org, filters)
+    await this.fetchSharedData();
 
+    this.state.isLoading = false;
     this.update();
+
+    // Now fetch the default active tab's data on-demand
+    this.fetchTabData(this.state.activeTab);
   }
 
   setupToastContainer() {
@@ -133,67 +145,179 @@ class BoranMotorsApp {
     }, 4000);
   }
 
-  async fetchDataFromBackend() {
+  // ── Lightweight shared data fetched once on startup ──
+  async fetchSharedData() {
     try {
-      console.log('🔄 Fetching CRM data from local MongoDB backend APIs...');
-      
-      const [healthRes, leadsRes, rooftopsRes, reportsRes, catalogRes, filtersRes, orgRes] = await Promise.allSettled([
+      console.log('🔄 Fetching shared CRM data (health, org, filters)...');
+      const [healthRes, filtersRes, orgRes] = await Promise.allSettled([
         api.getHealth(),
-        api.getLeads({ limit: 'all' }),
-        api.getRooftops(),
-        api.getReports(),
-        api.getCatalog(),
         api.getFilterOptions(),
         api.getOrganization()
       ]);
 
-      // Leads
-      if (leadsRes.status === 'fulfilled' && leadsRes.value?.data) {
-        this.leads = leadsRes.value.data;
-        this.state.totalCount = leadsRes.value.total || this.leads.length;
-        console.log(`✅ Loaded ${this.leads.length} leads from MongoDB database.`);
-      }
-
-      // Rooftops
-      if (rooftopsRes.status === 'fulfilled' && Array.isArray(rooftopsRes.value)) {
-        this.rooftops = rooftopsRes.value;
-      }
-
-      // Reports
-      if (reportsRes.status === 'fulfilled' && reportsRes.value) {
-        this.reports = reportsRes.value;
-      }
-
-      // Catalog
-      if (catalogRes.status === 'fulfilled' && catalogRes.value) {
-        this.catalog = catalogRes.value;
-      }
-
-      // Filters
       if (filtersRes.status === 'fulfilled' && filtersRes.value) {
         this.filterOptions = filtersRes.value;
       }
-
-      // Organization
       if (orgRes.status === 'fulfilled' && orgRes.value) {
         this.orgInfo = orgRes.value;
       }
-
-      // DB Status
       if (healthRes.status === 'fulfilled' && healthRes.value?.database) {
         this.state.dbConnected = healthRes.value.database.status === 'connected';
         this.state.dbInfo = healthRes.value.database;
       } else {
         this.state.dbConnected = true;
       }
-
+      console.log('✅ Shared data loaded.');
     } catch (error) {
       console.warn('⚠️ Could not connect to API backend, using fallback store:', error);
       this.state.dbConnected = false;
-      this.showToast('Backend API unavailable. Using cached memory data.', 'error');
-    } finally {
-      this.state.isLoading = false;
     }
+  }
+
+  // ── On-demand tab data fetching ──
+  async fetchTabData(tab, forceRefresh = false) {
+    const cache = this._tabCache[tab];
+    // Skip if already loaded and not forcing refresh
+    if (cache.status === 'loaded' && !forceRefresh) return;
+    // Skip if already loading (prevent duplicate parallel calls)
+    if (cache.status === 'loading') return;
+
+    cache.status = 'loading';
+    cache.error = null;
+    this.updateTabContent(); // Show loading state immediately
+
+    try {
+      switch (tab) {
+        case 'network':
+          await this._fetchNetworkData();
+          break;
+        case 'rooftops':
+          await this._fetchRooftopsData();
+          break;
+        case 'reports':
+          await this._fetchReportsData();
+          break;
+      }
+      cache.status = 'loaded';
+      console.log(`✅ Tab "${tab}" data loaded from API.`);
+    } catch (error) {
+      cache.status = 'error';
+      cache.error = error.message || 'Failed to load data';
+      console.error(`❌ Tab "${tab}" fetch error:`, error);
+      this.showToast(`Failed to load ${tab} data: ${error.message}`, 'error');
+    }
+
+    // Re-render tab content with data / error
+    this.updateTabContent();
+    this.updateKpis();
+    this.updateSidebar();
+    this._updateCountPills();
+  }
+
+  async _fetchNetworkData() {
+    console.log('🔄 Fetching Network Leads...');
+    const leadsRes = await api.getLeads({ limit: 'all' });
+    if (leadsRes?.data) {
+      this.leads = leadsRes.data;
+      this.state.totalCount = leadsRes.total || this.leads.length;
+      console.log(`   → ${this.leads.length} leads loaded.`);
+    }
+  }
+
+  async _fetchRooftopsData() {
+    console.log('🔄 Fetching Rooftops...');
+    const rooftopsData = await api.getRooftops();
+    if (Array.isArray(rooftopsData)) {
+      this.rooftops = rooftopsData;
+      console.log(`   → ${this.rooftops.length} rooftops loaded.`);
+    }
+    // If leads haven't been loaded yet, also fetch them for stats display
+    if (this._tabCache.network.status !== 'loaded') {
+      try {
+        const leadsRes = await api.getLeads({ limit: 'all' });
+        if (leadsRes?.data) {
+          this.leads = leadsRes.data;
+          this.state.totalCount = leadsRes.total || this.leads.length;
+          this._tabCache.network.status = 'loaded';
+        }
+      } catch (err) {
+        // Non-fatal: rooftops view can still render with fallback leads
+        console.warn('⚠️ Could not fetch leads for rooftop stats, using fallback.');
+      }
+    }
+  }
+
+  async _fetchReportsData() {
+    console.log('🔄 Fetching Reports & Catalog...');
+    const [reportsRes, catalogRes] = await Promise.allSettled([
+      api.getReports(),
+      api.getCatalog()
+    ]);
+    if (reportsRes.status === 'fulfilled' && reportsRes.value) {
+      this.reports = reportsRes.value;
+    }
+    if (catalogRes.status === 'fulfilled' && catalogRes.value) {
+      this.catalog = catalogRes.value;
+    }
+    // Throw if the primary reports fetch failed
+    if (reportsRes.status === 'rejected') {
+      throw reportsRes.reason;
+    }
+  }
+
+  _updateCountPills() {
+    const leadsPill = document.getElementById('leads-count-pill');
+    if (leadsPill) leadsPill.textContent = this.leads.length;
+    const roofPill = document.getElementById('rooftops-count-pill');
+    if (roofPill) roofPill.textContent = this.rooftops.length;
+  }
+
+  // ── Loading / Error state renderers ──
+  _renderTabLoading(tabName) {
+    const labels = {
+      network: { title: 'Loading Network Leads', desc: 'Fetching lead data from MongoDB...' },
+      rooftops: { title: 'Loading Dealership Rooftops', desc: 'Fetching rooftop data from MongoDB...' },
+      reports: { title: 'Loading Scoreboards & Reports', desc: 'Fetching report presets from MongoDB...' }
+    };
+    const label = labels[tabName] || labels.network;
+    return `
+      <div class="tab-loading-state">
+        <div class="tab-spinner"></div>
+        <div class="tab-loading-title">${label.title}</div>
+        <div class="tab-loading-desc">${label.desc}</div>
+        <div class="tab-skeleton-grid">
+          <div class="skeleton-bar" style="width:100%"></div>
+          <div class="skeleton-bar" style="width:85%"></div>
+          <div class="skeleton-bar" style="width:70%"></div>
+          <div class="skeleton-bar" style="width:90%"></div>
+        </div>
+      </div>
+    `;
+  }
+
+  _renderTabError(tabName, errorMsg) {
+    return `
+      <div class="tab-error-state">
+        <div class="tab-error-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="8" x2="12" y2="12"/>
+            <line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+        </div>
+        <div class="tab-error-info">
+          <div class="tab-error-title">Failed to Load Data</div>
+          <div class="tab-error-desc">${errorMsg || 'Could not connect to the backend API. Please check that the server is running on port 5000.'}</div>
+          <button class="btn-retry-tab" id="btn-retry-tab">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="23 4 23 10 17 10"/>
+              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+            </svg>
+            Retry
+          </button>
+        </div>
+      </div>
+    `;
   }
 
   setupGlobalShortcuts() {
@@ -228,20 +352,31 @@ class BoranMotorsApp {
         <div id="header-mount"></div>
         <div class="page-container" id="page-content-mount">
           <!-- Module Navigation Tabs -->
-          <nav class="module-tabs-nav">
-            <button class="module-tab-btn ${this.state.activeTab === 'network' ? 'active' : ''}" data-tab="network">
-              <span>Network Leads</span>
-              <span class="module-tab-pill" id="leads-count-pill">${this.leads.length}</span>
-            </button>
-            <button class="module-tab-btn ${this.state.activeTab === 'rooftops' ? 'active' : ''}" data-tab="rooftops">
-              <span>Dealership Rooftops</span>
-              <span class="module-tab-pill" id="rooftops-count-pill">${this.rooftops.length}</span>
-            </button>
-            <button class="module-tab-btn ${this.state.activeTab === 'reports' ? 'active' : ''}" data-tab="reports">
-              <span>Scoreboards & Reports</span>
-              <span class="module-tab-pill">14</span>
-            </button>
-          </nav>
+          <div class="module-tabs-wrapper">
+            <nav class="module-tabs-nav">
+              <button class="module-tab-btn ${this.state.activeTab === 'network' ? 'active' : ''}" data-tab="network">
+                <span>Network Leads</span>
+                <span class="module-tab-pill" id="leads-count-pill">${this.leads.length}</span>
+              </button>
+              <button class="module-tab-btn ${this.state.activeTab === 'rooftops' ? 'active' : ''}" data-tab="rooftops">
+                <span>Dealership Rooftops</span>
+                <span class="module-tab-pill" id="rooftops-count-pill">${this.rooftops.length}</span>
+              </button>
+              <button class="module-tab-btn ${this.state.activeTab === 'reports' ? 'active' : ''}" data-tab="reports">
+                <span>Scoreboards & Reports</span>
+                <span class="module-tab-pill">14</span>
+              </button>
+            </nav>
+            <div class="tab-actions">
+              <button class="btn-tab-refresh" id="btn-tab-refresh" title="Refresh current tab data">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" id="refresh-icon">
+                  <polyline points="23 4 23 10 17 10"/>
+                  <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                </svg>
+                <span>Refresh</span>
+              </button>
+            </div>
+          </div>
 
           <!-- KPI Summary -->
           <div id="kpi-banner-mount"></div>
@@ -261,6 +396,11 @@ class BoranMotorsApp {
         const tab = btn.getAttribute('data-tab');
         this.navigateTab(tab);
       });
+    });
+
+    // Refresh button event
+    document.getElementById('btn-tab-refresh')?.addEventListener('click', () => {
+      this.fetchTabData(this.state.activeTab, true);
     });
 
     // Mobile overlay close
@@ -289,7 +429,13 @@ class BoranMotorsApp {
       }
     });
 
-    this.update();
+    // On-demand fetch: trigger API call if this tab hasn't been loaded yet
+    const cache = this._tabCache[tab];
+    if (cache.status === 'idle' || cache.status === 'error') {
+      this.fetchTabData(tab);
+    } else {
+      this.update();
+    }
   }
 
   getFilteredAndSortedLeads() {
@@ -728,11 +874,40 @@ class BoranMotorsApp {
     const tabMount = document.getElementById('tab-content-mount');
     if (!tabMount) return;
 
-    // Update count pill in tabs
-    const leadsPill = document.getElementById('leads-count-pill');
-    if (leadsPill) leadsPill.textContent = this.leads.length;
-    const roofPill = document.getElementById('rooftops-count-pill');
-    if (roofPill) roofPill.textContent = this.rooftops.length;
+    this._updateCountPills();
+
+    // Update refresh button spinning state
+    const refreshIcon = document.getElementById('refresh-icon');
+    const cache = this._tabCache[this.state.activeTab];
+    if (refreshIcon) {
+      if (cache.status === 'loading') {
+        refreshIcon.classList.add('spinning');
+      } else {
+        refreshIcon.classList.remove('spinning');
+      }
+    }
+
+    // Show loading state if tab data is being fetched
+    if (cache.status === 'loading') {
+      tabMount.innerHTML = this._renderTabLoading(this.state.activeTab);
+      return;
+    }
+
+    // Show error state if tab fetch failed and we have no data to show
+    if (cache.status === 'error') {
+      const hasFallback = this.state.activeTab === 'network' ? this.leads.length > 0
+        : this.state.activeTab === 'rooftops' ? this.rooftops.length > 0
+        : Object.keys(this.reports).length > 0;
+
+      if (!hasFallback) {
+        tabMount.innerHTML = this._renderTabError(this.state.activeTab, cache.error);
+        tabMount.querySelector('#btn-retry-tab')?.addEventListener('click', () => {
+          this.fetchTabData(this.state.activeTab, true);
+        });
+        return;
+      }
+      // Has fallback data: render content with error banner (handled below)
+    }
 
     if (this.state.activeTab === 'network') {
       const filteredLeads = this.getFilteredAndSortedLeads();
@@ -891,13 +1066,49 @@ class BoranMotorsApp {
       });
 
     } else if (this.state.activeTab === 'rooftops') {
+      // Show non-blocking error banner if rooftops fetch failed but we have fallback data
+      if (cache.status === 'error' && this.rooftops.length > 0) {
+        const bannerHtml = `
+          <div class="tab-error-banner">
+            <div class="tab-error-banner-content">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              <span>Could not refresh from API. Showing cached data.</span>
+            </div>
+            <button class="btn-banner-retry" id="btn-banner-retry">Retry</button>
+          </div>
+        `;
+        const wrapper = document.createElement('div');
+        wrapper.innerHTML = bannerHtml;
+        tabMount.appendChild(wrapper);
+      }
       renderRooftopsView(tabMount, this.rooftops, this.leads, (dealershipName) => {
         this.navigateTab('network', { dealership: dealershipName });
       });
+      tabMount.querySelector('#btn-banner-retry')?.addEventListener('click', () => {
+        this.fetchTabData('rooftops', true);
+      });
     } else if (this.state.activeTab === 'reports') {
+      // Show non-blocking error banner if reports fetch failed but we have fallback data
+      if (cache.status === 'error' && Object.keys(this.reports).length > 0) {
+        const bannerHtml = `
+          <div class="tab-error-banner">
+            <div class="tab-error-banner-content">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              <span>Could not refresh from API. Showing cached data.</span>
+            </div>
+            <button class="btn-banner-retry" id="btn-banner-retry-reports">Retry</button>
+          </div>
+        `;
+        const wrapper = document.createElement('div');
+        wrapper.innerHTML = bannerHtml;
+        tabMount.appendChild(wrapper);
+      }
       renderReportsView(tabMount, this.reports, this.catalog, this.state.activeReportPreset, (presetId) => {
         this.state.activeReportPreset = presetId;
         this.updateTabContent();
+      });
+      tabMount.querySelector('#btn-banner-retry-reports')?.addEventListener('click', () => {
+        this.fetchTabData('reports', true);
       });
     }
   }
